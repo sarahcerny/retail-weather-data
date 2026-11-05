@@ -1,0 +1,323 @@
+---
+title: "Does Weather Move Retail? Seasonal Sales in Five Store Types"
+author: "Sarah Cerny"
+format:
+  html:
+    toc: true
+    embed-resources: true
+    code-fold: true
+    code-summary: "Show code"
+execute:
+  echo: true
+  warning: false
+jupyter: python3
+---
+
+## The Dataset
+
+This report uses `data/processed/retail_weather.csv`, built from two sources: monthly retail sales from the Census Bureau and monthly weather for Salt Lake City from Open-Meteo. Each row is one month for one store category (January 2016 to December 2025).
+
+```{python}
+#| label: setup
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+sns.set_theme(style="whitegrid", context="notebook")
+
+MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+          "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+CATEGORY_ORDER = [
+    "Clothing",
+    "Sporting goods, hobby, books",
+    "Building materials and garden",
+    "General merchandise",
+    "Food and beverage",
+]
+
+df = pd.read_csv("data/processed/retail_weather.csv")
+df["category"] = pd.Categorical(df["category"], CATEGORY_ORDER, ordered=True)
+df["date"] = pd.to_datetime(dict(year=df["year"], month=df["month"], day=1))
+df["period"] = np.where(df["holiday_flag"] == 1, "Nov-Dec", "Other months")
+
+# Seasonal index: each month's sales divided by that category's average month
+# in the same year. 1.0 = average month, 1.2 = 20% above average. This removes
+# the long-run growth trend and puts all five categories on one scale.
+df["seasonal_index"] = df["sales_millions"] / df.groupby(
+    ["category", "year"], observed=True
+)["sales_millions"].transform("mean")
+
+# 2020 is dominated by the pandemic, so seasonality and weather analyses
+# leave it out. Section 5 looks at 2020 directly.
+normal = df[df["year"] != 2020].copy()
+
+print(f"{df.shape[0]} rows, {df.shape[1]} columns")
+df.head()
+```
+
+### Summary of the data
+
+```{python}
+#| label: overview
+summary = df.groupby("category", observed=True)["sales_millions"].describe().round(0)
+summary
+```
+
+```{python}
+#| label: weather-summary
+weather = df.drop_duplicates(["year", "month"])  # weather is identical across categories
+weather[["avg_temp_f", "total_precip_in"]].describe().round(1)
+```
+
+**What we see:** *(Fill in: 600 rows, 5 categories, 120 months each. Which category has the biggest sales? Mention that sales are in millions of dollars and that Salt Lake temperatures span roughly X to Y °F.)*
+
+### Salt Lake City's weather by month
+
+```{python}
+#| label: weather-by-month
+#| fig-width: 8
+#| fig-height: 4
+by_month = weather.groupby("month").agg(
+    temp=("avg_temp_f", "mean"), precip=("total_precip_in", "mean")
+)
+
+fig, ax1 = plt.subplots()
+ax1.bar(MONTHS, by_month["precip"], color="lightsteelblue", label="Precipitation")
+ax1.set_ylabel("Avg monthly precipitation (in)")
+ax2 = ax1.twinx()
+ax2.plot(MONTHS, by_month["temp"], color="firebrick", marker="o", label="Temperature")
+ax2.set_ylabel("Avg temperature (°F)")
+ax2.grid(False)
+ax1.set_title("Salt Lake City climate, 2016-2025")
+plt.show()
+```
+
+*Salt Lake has real seasons, which is why we picked it. Add one sentence on when it is hottest, coldest, and wettest.*
+
+## Monthly Seasonality
+
+**Question:** Do different kinds of stores peak in different months?
+
+```{python}
+#| label: seasonality-lines
+#| fig-width: 9
+#| fig-height: 5.5
+season = (
+    normal.groupby(["category", "month"], observed=True)["seasonal_index"]
+    .mean()
+    .reset_index()
+)
+
+fig, ax = plt.subplots()
+sns.lineplot(data=season, x="month", y="seasonal_index", hue="category",
+             marker="o", ax=ax)
+ax.axhline(1.0, color="gray", linestyle="--", linewidth=1)
+ax.set_xticks(range(1, 13))
+ax.set_xticklabels(MONTHS)
+ax.set_xlabel("")
+ax.set_ylabel("Seasonal index (1.0 = average month)")
+ax.set_title("Average seasonal pattern by store type (2020 excluded)")
+ax.legend(title=None, loc="upper center", bbox_to_anchor=(0.5, -0.08), ncol=2)
+plt.show()
+```
+
+```{python}
+#| label: seasonality-table
+rows = []
+for cat, g in season.groupby("category", observed=True):
+    peak = g.loc[g["seasonal_index"].idxmax()]
+    low = g.loc[g["seasonal_index"].idxmin()]
+    rows.append({
+        "category": cat,
+        "peak_month": MONTHS[int(peak["month"]) - 1],
+        "peak_index": round(peak["seasonal_index"], 2),
+        "low_month": MONTHS[int(low["month"]) - 1],
+        "low_index": round(low["seasonal_index"], 2),
+        "peak_vs_low": round(peak["seasonal_index"] / low["seasonal_index"], 2),
+    })
+pd.DataFrame(rows)
+```
+
+```{python}
+#| label: seasonality-heatmap
+#| fig-width: 9
+#| fig-height: 3.8
+heat = season.pivot(index="category", columns="month", values="seasonal_index")
+heat.columns = MONTHS
+
+sns.heatmap(heat, annot=True, fmt=".2f", cmap="RdYlBu_r", center=1.0,
+            cbar_kws={"label": "Seasonal index"})
+plt.ylabel("")
+plt.title("Which months are strongest for each store type?")
+plt.show()
+```
+
+**What we see:** *(Fill in using the table: which category has the biggest peak-vs-low swing? Which is flattest? Is food and beverage, your "boring" control, actually flat? Does building materials peak in spring/summer like you predicted?)*
+
+### Sales over time
+
+```{python}
+#| label: sales-over-time
+#| fig-width: 10
+#| fig-height: 6
+g = sns.relplot(data=df, x="date", y="sales_millions", col="category",
+                col_wrap=3, kind="line", height=3, aspect=1.4,
+                facet_kws={"sharey": False})
+g.set_titles("{col_name}", size=10)
+g.set_axis_labels("", "Sales ($ millions)")
+for ax in g.axes.flat:
+    ax.axvspan(pd.Timestamp("2020-03-01"), pd.Timestamp("2020-06-30"),
+               color="red", alpha=0.15)
+plt.show()
+```
+
+*The shaded band is March-June 2020. Add a sentence on the long-run trend and what happened in the shaded area.*
+
+## Weather and Sales
+
+**Question:** Is there any relationship between temperature, rain, and sales?
+
+### The raw relationship
+
+```{python}
+#| label: temp-scatter
+#| fig-width: 10
+#| fig-height: 6
+g = sns.lmplot(data=normal, x="avg_temp_f", y="seasonal_index",
+               col="category", col_wrap=3, height=3, aspect=1.3, sharey=False,
+               scatter_kws={"alpha": 0.5, "s": 18}, line_kws={"color": "firebrick"})
+g.set_titles("{col_name}", size=10)
+g.set_axis_labels("Avg temperature (°F)", "Seasonal index")
+plt.show()
+```
+
+```{python}
+#| label: raw-correlations
+def corr_by_category(data, x, y):
+    return pd.Series({
+        cat: g[x].corr(g[y])
+        for cat, g in data.groupby("category", observed=True)
+    })
+
+raw_corr = pd.DataFrame({
+    "r_temperature": corr_by_category(normal, "avg_temp_f", "seasonal_index"),
+    "r_precipitation": corr_by_category(normal, "total_precip_in", "seasonal_index"),
+}).round(2)
+raw_corr
+```
+
+**What we see:** *(Fill in: which categories show a clear slope? Remember that r near 0 means no linear relationship, positive means warmer months go with higher sales, negative means colder months do.)*
+
+### The fairer test: unusual weather vs. unusual sales
+
+Temperature tracks the calendar, so a strong raw correlation could just mean "December is cold and busy." To separate weather from calendar, subtract each category-month's own average. The result asks: was *this* April warmer than a typical April, and were *this* April's sales higher than a typical April's?
+
+```{python}
+#| label: anomalies
+for col in ["seasonal_index", "avg_temp_f", "total_precip_in"]:
+    normal[col + "_anom"] = normal[col] - normal.groupby(
+        ["category", "month"], observed=True
+    )[col].transform("mean")
+
+g = sns.lmplot(data=normal, x="avg_temp_f_anom", y="seasonal_index_anom",
+               col="category", col_wrap=3, height=3, aspect=1.3, sharey=False,
+               scatter_kws={"alpha": 0.5, "s": 18}, line_kws={"color": "firebrick"})
+g.set_titles("{col_name}", size=10)
+g.set_axis_labels("Temperature vs. typical for that month (°F)",
+                  "Sales vs. typical for that month")
+plt.show()
+```
+
+```{python}
+#| label: anomaly-correlations
+anom_corr = pd.DataFrame({
+    "r_temperature": corr_by_category(normal, "avg_temp_f_anom", "seasonal_index_anom"),
+    "r_precipitation": corr_by_category(normal, "total_precip_in_anom", "seasonal_index_anom"),
+}).round(2)
+anom_corr
+```
+
+**What we see:** *(Fill in. Compare this table to the raw one. If the correlations shrink toward zero, most of the raw relationship was the calendar, not the weather. That is a real, honest finding either way. Report what you got.)*
+
+## Holiday Months
+
+**Question:** How much do November and December lift sales?
+
+```{python}
+#| label: holiday-box
+#| fig-width: 9
+#| fig-height: 4.5
+sns.boxplot(data=normal, y="category", x="seasonal_index", hue="period",
+            palette={"Other months": "lightgray", "Nov-Dec": "firebrick"},
+            orient="h")
+plt.axvline(1.0, color="gray", linestyle="--", linewidth=1)
+plt.xlabel("Seasonal index (1.0 = average month)")
+plt.ylabel("")
+plt.title("Holiday months vs. all other months")
+plt.legend(title=None)
+plt.show()
+```
+
+```{python}
+#| label: holiday-table
+holiday = (
+    normal.groupby(["category", "holiday_flag"], observed=True)["seasonal_index"]
+    .mean()
+    .unstack()
+)
+holiday.columns = ["other_months", "nov_dec"]
+holiday["holiday_lift_pct"] = ((holiday["nov_dec"] / holiday["other_months"] - 1) * 100).round(1)
+holiday.round(2)
+```
+
+**What we see:** *(Fill in: which category gets the biggest holiday lift, and which gets none or a dip? Note that holiday months are a judgment call, and say why you chose November-December.)*
+
+## What Did 2020 Do?
+
+**Question:** How badly did the pandemic hit each store type?
+
+```{python}
+#| label: covid
+#| fig-width: 9
+#| fig-height: 5
+wide = df.pivot_table(index=["category", "month"], columns="year",
+                      values="sales_millions", observed=True)
+yoy = ((wide[2020] / wide[2019] - 1) * 100).rename("pct_change").reset_index()
+
+fig, ax = plt.subplots()
+sns.lineplot(data=yoy, x="month", y="pct_change", hue="category", marker="o", ax=ax)
+ax.axhline(0, color="gray", linestyle="--", linewidth=1)
+ax.set_xticks(range(1, 13))
+ax.set_xticklabels(MONTHS)
+ax.set_xlabel("")
+ax.set_ylabel("2020 sales vs. same month in 2019 (%)")
+ax.set_title("The 2020 shock by store type")
+ax.legend(title=None, loc="upper center", bbox_to_anchor=(0.5, -0.08), ncol=2)
+plt.show()
+```
+
+```{python}
+#| label: covid-table
+worst = yoy.loc[yoy.groupby("category", observed=True)["pct_change"].idxmin()]
+worst["month"] = worst["month"].apply(lambda m: MONTHS[m - 1])
+worst.round(1)
+```
+
+**What we see:** *(Fill in: which category fell the most, in which month, and how fast did each recover? Food and beverage should behave very differently from clothing. Check whether it does.)*
+
+## Key Findings
+
+1. **Seasonality:** *(One sentence: which categories are strongly seasonal, with the peak months and swing size from your table.)*
+2. **Weather:** *(One sentence on what the anomaly correlations showed, and whether weather mattered once the calendar was removed.)*
+3. **Holidays:** *(One sentence with the largest and smallest holiday lifts.)*
+4. **2020:** *(One sentence with the deepest drop and the category that barely moved.)*
+
+## Limitations
+
+- Sales are **national**, but weather is from **one city** (Salt Lake City), so the match is imperfect.
+- Census estimates are **revised** over time. This data was retrieved on 2026-11-05.
+- Weather values are model-based reanalysis, not station readings.
+- Seasonality and weather results exclude 2020. Using the seasonal index also removes yearly growth, but not other events.
+- Correlation is not causation, and only about 108 non-2020 months per category go into each correlation.
+
