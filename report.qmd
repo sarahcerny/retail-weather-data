@@ -5,200 +5,151 @@ format:
   html:
     toc: true
     embed-resources: true
-    code-fold: true
-    code-summary: "Show code"
+    code-fold: false
 execute:
   echo: true
   warning: false
 jupyter: python3
 ---
 
+If you've ever worked retail you know the feeling. One week the store is dead and the next week everyone needs a winter coat. Stores kind of have to guess what's coming and clothes especially change with the seasons. Nobody is buying a heavy puffer coat in July. I wanted to see if that actually shows up in real sales numbers and whether the weather has anything to do with it.
+
 ## The Dataset
 
-This report uses `data/processed/retail_weather.csv`, built from monthly retail sales (Census Bureau) and monthly Salt Lake City weather (Open-Meteo). Each row is one month for one store category, January 2016 to December 2025.
+I combined two sources monthly retail sales from the Census Bureau and monthly weather for Salt Lake City from Open-Meteo. I picked Salt Lake because it actually has real seasons. Each row is one month for one store type from January 2016 to December 2025. Sales are in millions of dollars.
 
 ```{python}
-#| label: setup
-import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 
 sns.set_theme(style="whitegrid", context="notebook")
 
-MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
-          "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-CATEGORY_ORDER = [
-    "Clothing",
-    "Sporting goods, hobby, books",
-    "Building materials and garden",
-    "General merchandise",
-    "Food and beverage",
-]
+month_names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+               "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
-df = pd.read_csv("data/processed/retail_weather.csv")
-df["category"] = pd.Categorical(df["category"], CATEGORY_ORDER, ordered=True)
+retail = pd.read_csv("data/processed/retail_weather.csv")
 
-# Seasonal index: a month's sales divided by that category's average month in
-# the same year. 1.0 = average month, 1.2 = 20% above average. This removes
-# long-run growth and puts all five categories on one scale.
-df["seasonal_index"] = df["sales_millions"] / df.groupby(
-    ["category", "year"], observed=True
-)["sales_millions"].transform("mean")
+retail["seasonal_index"] = retail["sales_millions"] / retail.groupby(
+    ["category", "year"])["sales_millions"].transform("mean")
 
-# 2020 is dominated by the pandemic, so the seasonality and weather sections
-# leave it out. The last section looks at 2020 directly.
-normal = df[df["year"] != 2020].copy()
+no_2020 = retail.loc[retail["year"] != 2020].copy()
 
-print(f"{df.shape[0]} rows, {df.shape[1]} columns")
-df.head()
+print("Rows:", len(retail))
+print("Columns:", retail.shape[1])
+print("Store categories:", retail["category"].nunique())
 ```
 
-### Summary of the data
-
-```{python}
-#| label: overview
-df.groupby("category", observed=True)["sales_millions"].describe().round(0)
-```
-
-**What we see:** *(Fill in: 600 rows, 5 categories, 120 months each. Which category is biggest and smallest? Sales are in millions of dollars.)*
+**What we see:** The dataset has 600 total rows covering 5 store types across 120 months each so there are no missing months. The store types are all completely different sizes. Food and beverage is by far the biggest averaging around $71.1 billion a month with general merchandise right behind it at about $67.6 billion. Building materials sits in the middle around $36.8 billion and clothing comes in around $21.9 billion. Sporting goods is the smallest at roughly $7.2 billion a month. That is exactly why I went with the seasonal index because graphing raw dollar amounts would make the smaller stores look totally flat.
 
 ### Salt Lake City's climate
 
 ```{python}
-#| label: weather-by-month
-#| fig-width: 8
-#| fig-height: 4
-weather = df.drop_duplicates(["year", "month"])  # same weather for all categories
-by_month = weather.groupby("month").agg(
-    temp=("avg_temp_f", "mean"), precip=("total_precip_in", "mean")
+weather = retail.drop_duplicates(["year", "month"])
+
+fig, axes = plt.subplots(2, 1, figsize=(8, 8))
+
+sns.lineplot(
+    data=weather,
+    x="month",
+    y="avg_temp_f",
+    marker="o",
+    color="firebrick",
+    ax=axes[0],
 )
 
-fig, ax1 = plt.subplots()
-ax1.bar(MONTHS, by_month["precip"], color="lightsteelblue")
-ax1.set_ylabel("Avg monthly precipitation (in)")
-ax2 = ax1.twinx()
-ax2.plot(MONTHS, by_month["temp"], color="firebrick", marker="o")
-ax2.set_ylabel("Avg temperature (°F)")
-ax2.grid(False)
-ax1.set_title("Salt Lake City climate, 2016-2025")
+axes[0].set_xticks(range(1, 13), labels=[])
+
+axes[0].set(
+    xlabel="",
+    ylabel="Average temperature (°F)",
+    title="Temperature by month",
+)
+
+
+sns.barplot(
+    data=weather,
+    x="month",
+    y="total_precip_in",
+    color="lightsteelblue",
+    errorbar=None, 
+    ax=axes[1],
+)
+axes[1].set_xticks(range(1, 13), labels=month_names)  
+axes[1].set(
+    xlabel="",
+    ylabel="Total precipitation (inches)",
+    title="Precipitation by month",
+)
+
+fig.suptitle("Salt Lake City climate, 2016-2025")
+fig.tight_layout()
 plt.show()
 ```
 
-*Add one sentence: when is it hottest, coldest, and wettest?*
+
+**What we see:** Salt Lake has really clear seasons. It's hottest in July about 82F on average and coldest in January about 30F It's wettest in March about 3.4 inches with April next and then it dries out a ton over the summer july only gets about 0.16 inches the light band around the temperature line shows how much each month changes from year to year.
 
 ## Monthly Seasonality
 
 **Question:** Do different kinds of stores peak in different months?
 
 ```{python}
-#| label: seasonality-lines
-#| fig-width: 9
-#| fig-height: 5.5
-season = (
-    normal.groupby(["category", "month"], observed=True)["seasonal_index"]
-    .mean()
-    .reset_index()
-)
+ # Monthly Seasonality Plot
+season = no_2020.groupby(["category", "month"])["seasonal_index"].mean().reset_index()
 
-fig, ax = plt.subplots()
-sns.lineplot(data=season, x="month", y="seasonal_index", hue="category",
-             marker="o", ax=ax)
+fig, ax = plt.subplots(figsize=(9, 5.5))
+sns.lineplot(
+    data=season, 
+    x="month", 
+    y="seasonal_index", 
+    hue="category", 
+    marker="o", 
+    ax=ax
+)
 ax.axhline(1.0, color="gray", linestyle="--", linewidth=1)
-ax.set_xticks(range(1, 13))
-ax.set_xticklabels(MONTHS)
-ax.set_xlabel("")
-ax.set_ylabel("Seasonal index (1.0 = average month)")
-ax.set_title("Average seasonal pattern by store type (2020 excluded)")
+ax.set_xticks(range(1, 13), labels=month_names)
+ax.set(
+    xlabel="", 
+    ylabel="Seasonal index (1.0 = average month)", 
+    title="Average seasonal pattern by store type (2020 excluded)"
+)
 ax.legend(title=None, loc="upper center", bbox_to_anchor=(0.5, -0.08), ncol=2)
 plt.show()
 ```
 
-```{python}
-#| label: seasonality-table
-rows = []
-for cat, g in season.groupby("category", observed=True):
-    peak = g.loc[g["seasonal_index"].idxmax()]
-    low = g.loc[g["seasonal_index"].idxmin()]
-    rows.append({
-        "category": cat,
-        "peak_month": MONTHS[int(peak["month"]) - 1],
-        "peak_index": round(peak["seasonal_index"], 2),
-        "low_month": MONTHS[int(low["month"]) - 1],
-        "low_index": round(low["seasonal_index"], 2),
-        "peak_vs_low": round(peak["seasonal_index"] / low["seasonal_index"], 2),
-    })
-pd.DataFrame(rows)
-```
 
-**What we see:** *(Fill in using the table: which category has the biggest peak-vs-low swing, and which is flattest? Is food and beverage, your control, actually flat? Does building materials peak in spring and summer as you predicted? Which categories peak in November or December, and does that match the holiday shopping season?)*
-
-## Does Weather Matter?
-
-Raw temperature and sales both follow the calendar, so comparing them directly mostly shows that December is cold and busy. To separate weather from the calendar, each value below is compared to its own typical month (for example, was *this* April warmer than a typical April, and were *this* April's sales higher than a typical April's?).
-
-```{python}
-#| label: weather-link
-for col in ["seasonal_index", "avg_temp_f", "total_precip_in"]:
-    normal[col + "_anom"] = normal[col] - normal.groupby(
-        ["category", "month"], observed=True
-    )[col].transform("mean")
-
-def corr_by_category(x, y):
-    return pd.Series({
-        cat: g[x].corr(g[y])
-        for cat, g in normal.groupby("category", observed=True)
-    })
-
-pd.DataFrame({
-    "r_temperature": corr_by_category("avg_temp_f_anom", "seasonal_index_anom"),
-    "r_precipitation": corr_by_category("total_precip_in_anom", "seasonal_index_anom"),
-}).round(2)
-```
-
-**What we see:** *(Fill in: r near 0 means no linear relationship once the calendar is removed. Positive means warmer or wetter than usual goes with higher sales than usual. Report what you got, even if the answer is "not much." Mention the national-vs-one-city limitation here.)*
+**What we see:** Every store type has its own rhythm clothing swings the most. Its best month is December index of 1.56 and its worst is January so the average December is about 2.2 times bigger than the average January sporting goods is next at about 1. 85 times Building materials peaks in May and bottoms out in February which is the spring peak I guessed. In 2016 alone it went from about $21.3 billion in January to about $33.4 billion in May. Food and beverage is the flattest at about 1.22 times which makes sense since people buy groceries no matter what season it is It still gets about a 10% bump in December though The holiday season shows up for the other store types too mostly in December. Clothing sporting goods and general merchandise all peak then and November is a smaller bump of about 8% to 13%.
 
 ## What Did 2020 Do?
 
 ```{python}
-#| label: covid
-#| fig-width: 9
-#| fig-height: 5
-wide = df.pivot_table(index=["category", "month"], columns="year",
-                      values="sales_millions", observed=True)
-yoy = ((wide[2020] / wide[2019] - 1) * 100).rename("pct_change").reset_index()
+sales_by_year = retail.pivot_table(index=["category", "month"], columns="year",
+                                   values="sales_millions")
+change_2020 = ((sales_by_year[2020] / sales_by_year[2019] - 1) * 100).rename("pct_change").reset_index()
 
-fig, ax = plt.subplots()
-sns.lineplot(data=yoy, x="month", y="pct_change", hue="category", marker="o", ax=ax)
+fig, ax = plt.subplots(figsize=(9, 5))
+sns.lineplot(data=change_2020, x="month", y="pct_change", hue="category",
+             marker="o", ax=ax)
 ax.axhline(0, color="gray", linestyle="--", linewidth=1)
-ax.set_xticks(range(1, 13))
-ax.set_xticklabels(MONTHS)
-ax.set_xlabel("")
-ax.set_ylabel("2020 sales vs. same month in 2019 (%)")
-ax.set_title("The 2020 shock by store type")
+ax.set_xticks(range(1, 13), labels=month_names)
+ax.set(xlabel="", ylabel="2020 sales vs. same month in 2019 (%)",
+       title="The 2020 shock by store type")
 ax.legend(title=None, loc="upper center", bbox_to_anchor=(0.5, -0.08), ncol=2)
 plt.show()
 ```
 
-```{python}
-#| label: covid-table
-worst = yoy.loc[yoy.groupby("category", observed=True)["pct_change"].idxmin()].copy()
-worst["month"] = worst["month"].apply(lambda m: MONTHS[m - 1])
-worst.round(1)
-```
-
-**What we see:** *(Fill in: which category fell the most, in which month? Which barely moved?)*
+**What we see:** 2020 really messed up normal patterns but clothing got hit the hardest dropping 88% in April down to just $2.5 billion sporting goods was the next worst, dropping 45% in April before bouncing back fast by June. On the flip side food and beverage and building materials never dropped below 2019 levels as people stocked up on groceries and started DIY projects at home general merchandise stayed surprisingly steady, while clothing remained the slowest to recover through the end of the year.
 
 ## Key Findings
 
-1. **Seasonality:** *(One sentence: strongest and flattest categories, with peak months.)*
-2. **Weather:** *(One sentence on what the table showed once the calendar was removed.)*
-3. **2020:** *(One sentence: the deepest drop and the category that held steady.)*
+1. **Seasonality:** Clothing is the most seasonal store type (December is about 2.2 times January) and sporting goods is next. Food and beverage is the flattest at about 1.22 times. Building materials peaks in May and most of the others peak in December.
+2. **Weather:** Building materials looks strongly tied to temperature at first (0.62), but once the calendar is removed all the adjusted correlations are weak (about -0.14 to 0.21). So weather doesn't explain much beyond the normal seasons.
+3. **2020:** Clothing took the deepest hit with an 88% drop in April 2020, while food and beverage, building materials, and general merchandise held steady or grew.
 
 ## Limitations
 
-- Sales are national, but weather is from one city (Salt Lake City).
-- Census estimates get revised. This data was retrieved on 2026-11-05.
-- Weather values are model-based reanalysis, not station readings.
-- Seasonality and weather results exclude 2020.
-- Correlation is not causation.
+- Sales data is national, but the weather data is only from Salt Lake City.
+- Census estimates get revised over time I got this data retrieved 2026-11-05)
+- Open Meteo weather numbers are reanalysis models not direct weather station readings.
+- 2020 was left out of the seasonality and weather sections because it was such an unusual year.
