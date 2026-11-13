@@ -17,6 +17,8 @@ If you've ever worked retail you know the feeling. One week the store is dead an
 ## The Dataset
 I combined two sources: monthly retail sales from the Census Bureau Monthly Retail Trade survey(https://www.census.gov/retail) and monthly weather for Salt Lake City from Open-Meteo(https://open-meteo.com/en/docs/historical-weather-api). I picked Salt Lake because it actually has real seasons. Each row is one month for one store type from January 2016 to December 2025. Sales are in millions of dollars. 
 
+The cleaned dataset (data/processed/retail_weather.csv) and full data collection scripts are available in my GitHub repository for anyone who wants to reproduce these charts.
+
 ```{python}
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -142,6 +144,8 @@ plt.show()
 ```
 
 **What we see:** 2020 really messed up normal patterns but clothing got hit the hardest dropping 88% in April down to just $2.5 billion sporting goods was the next worst dropping 45% in April before bouncing back fast by June. On the flip side food and beverage and building materials never dropped below 2019 levels as people stocked up on groceries and started DIY projects at home general merchandise stayed surprisingly steady while clothing remained the slowest to recover through the end of the year.
+
+Because 2020 had such extreme pandemic drops and spikes—like clothing falling 88% in April—including it would have artificially pulled down the spring averages and distorted what a 'normal' year looks like.
 
 ## Conclusion
 
