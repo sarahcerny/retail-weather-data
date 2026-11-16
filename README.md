@@ -2,7 +2,7 @@
 
 ## What is this
 
-This is my data project for STAT 386. I put together monthly retail sales from the Census Bureau and monthly weather for Salt Lake City to see if sales follow the seasons and if the weather has anything to do with it. My full write up is on my (http://localhost:7832/)
+This is my data project for STAT 386. I put together monthly retail sales from the Census Bureau and monthly weather for Salt Lake City to see if sales follow the seasons and if the weather has anything to do with it. My full write up is on my 
 
 ## The question
 
